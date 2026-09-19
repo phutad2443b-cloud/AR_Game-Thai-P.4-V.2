@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR สะกดคำไทย ป.4 แบบแจกลูกสะกดคำ </title>
+	<title>ครูภูทัด จันทร์พัชรินทร์ </title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Mitr', sans-serif;
+            overflow: hidden;
+            background-color: #f0f9ff;
+            user-select: none;
+        }
+        #video-element {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 0;
+            opacity: 0.3;
+        }
+        #output-canvas {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            pointer-events: none;
+        }
+        #ui-layer {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .letter-card {
+            position: absolute;
+            width: 120px; /* ขยายขนาดกล่อง */
+            height: 120px;
+            background: white;
+            border: 5px solid #3b82f6; /* เพิ่มความหนาขอบ */
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4.5rem; /* ขยายขนาดตัวอักษรให้ใหญ่ชัดเจน */
+            font-weight: 600;
+            color: #1e3a8a;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            transform: translate(-50%, -50%);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .letter-card.held {
+            border-color: #f59e0b;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+            z-index: 50;
+        }
+        .letter-card.placed {
+            background: #22c55e;
+            color: white;
+            border-color: #166534;
+        }
+        .drop-zone {
+            position: absolute;
+            width: 120px; /* ขยายขนาดช่องวางให้พอดีกับกล่องอักษร */
+            height: 120px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 5px dashed #9ca3af;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem; /* ขยายตัวเลขลำดับ */
+            color: #6b7280;
+            transform: translate(-50%, -50%);
+        }
+        .drop-zone.filled {
+            border-color: transparent;
+            background: transparent;
+        }
+        .pointer {
+            position: absolute;
+            width: 28px; /* ขยายจุด Pointer เล็กน้อยให้เห็นชัดขึ้น */
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(239, 68, 68, 0.7);
+            border: 3px solid white;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            transition: background-color 0.1s;
+        }
+        .pointer.pinching {
+            background: rgba(34, 197, 94, 0.9);
+            transform: translate(-50%, -50%) scale(0.8);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Start Screen -->
+    <div id="start-screen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-blue-400 to-indigo-600 text-white">
+        <div class="text-7xl mb-4">✏️</div>
+        <h1 class="text-5xl font-bold mb-2 shadow-sm">สะกดคำไทย ป.4 ครูภูทัด</h1>
+        <p class="text-xl mb-8">เกม AR ลากตัวอักษรด้วยมือ (ไม่ต้องแตะจอ) v.2</p>
+        <div class="bg-white text-blue-800 rounded-2xl p-6 mb-8 max-w-md text-center shadow-xl">
+            <h2 class="text-2xl font-bold mb-4">วิธีเล่น</h2>
+            <ul class="text-left space-y-2 mb-4">
+                <li>1. อนุญาตให้ใช้งาน <b>กล้อง (Camera)</b> 📷</li>
+                <li>2. นำนิ้วโป้งและนิ้วชี้ <b>จีบเข้าหากัน</b> เพื่อหยิบตัวอักษร</li>
+                <li>3. ลากตัวอักษรไปวางในช่องว่างให้เป็นคำที่ถูกต้อง</li>
+            </ul>
+        </div>
+        <button onclick="startGame()" class="px-10 py-4 bg-yellow-400 hover:bg-yellow-300 text-yellow-900 text-3xl font-bold rounded-full shadow-lg transition transform hover:scale-105 active:scale-95">
+            เริ่มเล่นเกม
+        </button>
+    </div>
+
+    <!-- Game Screen -->
+    <video id="video-element" autoplay playsinline></video>
+    <canvas id="output-canvas"></canvas>
+    
+    <div id="ui-layer" class="hidden">
+        <!-- Pointer -->
+        <div id="hand-pointer" class="pointer hidden"></div>
+
+        <!-- Header / Hint -->
+        <div class="absolute top-8 left-0 right-0 flex justify-center">
+            <div class="bg-white px-8 py-4 rounded-full shadow-lg text-center border-4 border-indigo-200">
+                <p class="text-gray-500 text-sm font-semibold mb-1">คำใบ้ที่ <span id="level-display">1/12</span></p>
+                <h2 id="hint-text" class="text-3xl font-bold text-indigo-700">🌂 ของกันฝน</h2>
+            </div>
+        </div>
+
+        <!-- Dynamic Dropzones and Letters will be injected here -->
+        <div id="drop-zones-container"></div>
+        <div id="letters-container"></div>
+    </div>
+
+    <!-- End Screen -->
+    <div id="end-screen" class="fixed inset-0 z-50 hidden flex-col items-center justify-center bg-gradient-to-b from-green-400 to-emerald-600 text-white">
+        <div class="text-8xl mb-4">🏆</div>
+        <h1 class="text-6xl font-bold mb-2">ยอดเยี่ยมมาก!</h1>
+        <p class="text-3xl mb-8">คุณสะกดคำถูกต้องทั้งหมด</p>
+        <div class="flex space-x-4 mb-8">
+            <div class="text-7xl text-yellow-300">⭐</div>
+            <div class="text-7xl text-yellow-300">⭐</div>
+            <div class="text-7xl text-yellow-300">⭐</div>
+        </div>
+        <button onclick="resetGame()" class="px-10 py-4 bg-white text-green-700 text-3xl font-bold rounded-full shadow-lg transition transform hover:scale-105 active:scale-95">
+            เล่นอีกครั้ง
+        </button>
+    </div>
+
+    <script>
+        const wordsData = [
+			{ hint: "🪺 บ้านของนก", word: "รังนก" },
+			{ hint: "🔔 มีเสียงดัง", word: "กระดิ่ง" },
+			{ hint: "🧽 ใช้ล้างจาน", word: "ฟองน้ำ" },
+            { hint: "🔩 ใช้ยึดกับสิ่งของ", word: "น๊อต" },
+            { hint: "🪞 ใช่ส่อง", word: "กระจก" },
+            { hint: "💵 ใช้สำหรับซื้อของ", word: "ธนบัตร" },
+            { hint: "📸 อุปกรณืบันทึกภาพ", word: "กล้อง" },
+            { hint: "⚓️ ไว้สำหรับจอดเรือ (มี ส สะกด)", word: "สมอ" },
+            { hint: "🚲 ยานพาหนะ", word: "จักรยาน" },
+            { hint: "🌋 ข้างในจะมีลาวา", word: "ภูเขาไฟ" },
+            { hint: "🛤 ถนนของรถไฟ", word: "รางรถไฟ" },
+            { hint: "🎲 ไว้สำหรับเล่นเกมส์", word: "ลูกเต๋า" }
+        ];
+
+        let currentLevel = 0;
+        let targetCharacters = [];
+        let letterObjects = [];
+        let dropZoneObjects = [];
+        let heldLetter = null;
+
+        const videoElement = document.getElementById('video-element');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const pointer = document.getElementById('hand-pointer');
+        const uiLayer = document.getElementById('ui-layer');
+
+        // --- Audio System ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playTone(freq, type, duration, vol=0.1) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playSound(type) {
+            if (type === 'correct') {
+                playTone(600, 'sine', 0.1);
+                setTimeout(() => playTone(800, 'sine', 0.15), 100);
+            } else if (type === 'wrong') {
+                playTone(300, 'sawtooth', 0.2);
+            } else if (type === 'win') {
+                [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+                    setTimeout(() => playTone(f, 'sine', 0.2, 0.15), i * 150);
+                });
+            }
+        }
+
+        function speak(text) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'th-TH';
+            utterance.rate = 0.9;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- Game Logic ---
+        function startGame() {
+            document.getElementById('start-screen').classList.add('hidden');
+            uiLayer.classList.remove('hidden');
+            
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            
+            initMediaPipe();
+            speak("ดูภาพใบ้แล้วสะกดคำให้ถูกต้อง");
+            loadLevel(currentLevel);
+        }
+
+        function loadLevel(levelIndex) {
+            const data = wordsData[levelIndex];
+            document.getElementById('hint-text').innerText = data.hint;
+            document.getElementById('level-display').innerText = `${levelIndex + 1}/${wordsData.length}`;
+            
+            targetCharacters = Array.from(data.word);
+            setupBoard(targetCharacters);
+            speak(data.hint);
+        }
+
+        function setupBoard(chars) {
+            const dzContainer = document.getElementById('drop-zones-container');
+            const lettersContainer = document.getElementById('letters-container');
+            dzContainer.innerHTML = '';
+            lettersContainer.innerHTML = '';
+            
+            dropZoneObjects = [];
+            letterObjects = [];
+            
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            const startY_DZ = screenH * 0.45;
+            const startY_Letters = screenH * 0.75;
+            
+            const gap = 140; // เพิ่มระยะห่างระหว่างตัวอักษรให้สมดุลกับขนาดกล่องใหม่
+            const totalWidth = (chars.length - 1) * gap;
+            const startX = (screenW - totalWidth) / 2;
+
+            // Create Drop Zones
+            chars.forEach((char, index) => {
+                const dz = document.createElement('div');
+                dz.className = 'drop-zone';
+                dz.innerText = index + 1;
+                const x = startX + (index * gap);
+                const y = startY_DZ;
+                dz.style.left = `${x}px`;
+                dz.style.top = `${y}px`;
+                dzContainer.appendChild(dz);
+                
+                dropZoneObjects.push({ element: dz, x, y, char, filled: false });
+            });
+
+            // Create Shuffled Letters
+            let shuffledChars = chars.map((char, index) => ({ char, targetIndex: index }));
+            shuffledChars.sort(() => Math.random() - 0.5);
+            
+            const letterTotalWidth = (shuffledChars.length - 1) * gap;
+            const letterStartX = (screenW - letterTotalWidth) / 2;
+
+            shuffledChars.forEach((item, index) => {
+                const ltr = document.createElement('div');
+                ltr.className = 'letter-card';
+                ltr.innerText = item.char;
+                
+                const rx = letterStartX + (index * gap) + (Math.random() * 20 - 10);
+                const ry = startY_Letters + (Math.random() * 40 - 20);
+                
+                ltr.style.left = `${rx}px`;
+                ltr.style.top = `${ry}px`;
+                lettersContainer.appendChild(ltr);
+                
+                letterObjects.push({
+                    element: ltr,
+                    currentX: rx, currentY: ry,
+                    originX: rx, originY: ry,
+                    targetIndex: item.targetIndex,
+                    isPlaced: false
+                });
+            });
+        }
+
+        // --- Interaction Logic (Hand Tracking Callback) ---
+        function checkCollisions(pointerX, pointerY, isPinching) {
+            pointer.classList.remove('hidden');
+            pointer.style.left = `${pointerX}px`;
+            pointer.style.top = `${pointerY}px`;
+            
+            if (isPinching) {
+                pointer.classList.add('pinching');
+                
+                if (!heldLetter) {
+                    // Try to grab a letter
+                    for (let l of letterObjects) {
+                        if (!l.isPlaced) {
+                            const dist = Math.hypot(pointerX - l.currentX, pointerY - l.currentY);
+                            if (dist < 70) { // ขยายรัศมีการหยิบให้กว้างขึ้นตามขนาดตัวอักษร
+                                heldLetter = l;
+                                l.element.classList.add('held');
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    // Dragging
+                    heldLetter.currentX = pointerX;
+                    heldLetter.currentY = pointerY;
+                    heldLetter.element.style.left = `${pointerX}px`;
+                    heldLetter.element.style.top = `${pointerY}px`;
+                }
+            } else {
+                pointer.classList.remove('pinching');
+                
+                // Release letter
+                if (heldLetter) {
+                    heldLetter.element.classList.remove('held');
+                    
+                    // Check drop zone intersection
+                    const targetDZ = dropZoneObjects[heldLetter.targetIndex];
+                    const dist = Math.hypot(heldLetter.currentX - targetDZ.x, heldLetter.currentY - targetDZ.y);
+                    
+                    if (dist < 80 && !targetDZ.filled) { // ขยายรัศมีการวางให้กว้างขึ้น
+                        // Correct Place
+                        heldLetter.isPlaced = true;
+                        heldLetter.currentX = targetDZ.x;
+                        heldLetter.currentY = targetDZ.y;
+                        heldLetter.element.style.left = `${targetDZ.x}px`;
+                        heldLetter.element.style.top = `${targetDZ.y}px`;
+                        heldLetter.element.classList.add('placed');
+                        
+                        targetDZ.filled = true;
+                        targetDZ.element.classList.add('filled');
+                        targetDZ.element.innerText = '';
+                        
+                        playSound('correct');
+                        createParticles(targetDZ.x, targetDZ.y);
+                        checkWin();
+                    } else {
+                        // Wrong Place - bounce back
+                        playSound('wrong');
+                        heldLetter.currentX = heldLetter.originX;
+                        heldLetter.currentY = heldLetter.originY;
+                        heldLetter.element.style.left = `${heldLetter.originX}px`;
+                        heldLetter.element.style.top = `${heldLetter.originY}px`;
+                    }
+                    heldLetter = null;
+                }
+            }
+        }
+
+        function checkWin() {
+            if (dropZoneObjects.every(dz => dz.filled)) {
+                playSound('win');
+                setTimeout(() => {
+                    if (currentLevel < wordsData.length - 1) {
+                        currentLevel++;
+                        speak("เก่งมาก ไปคำต่อไปกันเลย");
+                        loadLevel(currentLevel);
+                    } else {
+                        uiLayer.classList.add('hidden');
+                        document.getElementById('end-screen').classList.remove('hidden');
+                        document.getElementById('end-screen').classList.add('flex');
+                        speak("ยอดเยี่ยมมาก คุณสะกดคำถูกต้องทั้งหมด");
+                    }
+                }, 2000);
+            }
+        }
+
+        function resetGame() {
+            currentLevel = 0;
+            document.getElementById('end-screen').classList.add('hidden');
+            document.getElementById('end-screen').classList.remove('flex');
+            uiLayer.classList.remove('hidden');
+            loadLevel(currentLevel);
+        }
+
+        // --- MediaPipe Hands Setup ---
+        function initMediaPipe() {
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+
+            hands.onResults((results) => {
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const landmarks = results.multiHandLandmarks[0];
+                    
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 2});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#3b82f6', lineWidth: 1, radius: 3});
+
+                    const thumb = landmarks[4];
+                    const index = landmarks[8];
+                    
+                    const screenW = window.innerWidth;
+                    const screenH = window.innerHeight;
+                    
+                    const thumbX = (1 - thumb.x) * screenW;
+                    const thumbY = thumb.y * screenH;
+                    const indexX = (1 - index.x) * screenW;
+                    const indexY = index.y * screenH;
+
+                    const pointerX = (thumbX + indexX) / 2;
+                    const pointerY = (thumbY + indexY) / 2;
+
+                    const dx = thumb.x - index.x;
+                    const dy = thumb.y - index.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const isPinching = distance < 0.045; 
+
+                    checkCollisions(pointerX, pointerY, isPinching);
+                } else {
+                    pointer.classList.add('hidden');
+                    if(heldLetter) {
+                        heldLetter.element.classList.remove('held');
+                        heldLetter = null;
+                    }
+                }
+                
+                drawParticles();
+            });
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+
+        // --- Visual Effects (Particles) ---
+        let particles = [];
+        function createParticles(x, y) {
+            for(let i=0; i<40; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: (Math.random() - 0.5) * 12 - 5,
+                    life: 1,
+                    color: `hsl(${Math.random() * 360}, 100%, 50%)`
+                });
+            }
+        }
+        function drawParticles() {
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.2; // gravity
+                p.life -= 0.02;
+                
+                if(p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                
+                canvasCtx.globalAlpha = p.life;
+                canvasCtx.fillStyle = p.color;
+                canvasCtx.beginPath();
+                canvasCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+                canvasCtx.fill();
+            }
+            canvasCtx.globalAlpha = 1.0;
+        }
+
+        window.addEventListener('resize', () => {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            if(!document.getElementById('start-screen').classList.contains('hidden')) return;
+            setupBoard(targetCharacters); 
+        });
+    </script>
+</body>
+</html>
